@@ -15,22 +15,47 @@
       padding: 20px;
     }
 
-    /* --- 上部：予約リスト用スタイル（新規追加） --- */
+    /* --- 上部：予約リスト用スタイル --- */
     .list-container {
-      max-width: 800px; /* リストは少し広めに */
+      max-width: 800px;
       margin: 0 auto 30px auto;
       background: #fff;
       padding: 20px;
       border-radius: 14px;
       box-shadow: 0 8px 20px rgba(0,0,0,.08);
     }
-    .filter-area { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
-    .filter-area input { margin-top: 0; } /* 調整 */
-    .btn-filter {
-      padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;
-      font-weight: bold; background: #e0e0e0; color: #555;
+    
+    /* ボタンエリアを横スクロール可能に */
+    .filter-area {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+      overflow-x: auto; /* 横スクロール */
+      padding-bottom: 5px; /* スクロールバーのスペース */
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch; /* スマホで滑らかに */
     }
+    /* スクロールバーを目立たなくする */
+    .filter-area::-webkit-scrollbar { height: 4px; }
+    .filter-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+
+    .btn-filter {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 20px; /* 丸っこく */
+      cursor: pointer;
+      font-weight: bold;
+      background: #f0f2f5;
+      color: #555;
+      font-size: 13px;
+      flex-shrink: 0; /* 縮まないように */
+      transition: background 0.2s;
+    }
+    .btn-filter:hover { background: #e4e6eb; }
     .btn-filter.active { background: #2563eb; color: #fff; }
+
+    .search-area { margin-bottom: 10px; }
+    .search-area input { margin-top: 0; }
     
     .table-wrapper { max-height: 250px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 13px; }
@@ -40,7 +65,7 @@
     tr.clickable:hover { background-color: #e3f2fd; }
     tr.selected { background-color: #bbdefb; border-left: 5px solid #2563eb; }
 
-    /* --- 下部：生成ツール用スタイル（頂いたコードそのまま） --- */
+    /* --- 下部：生成ツール用スタイル（保持） --- */
     .box {
       max-width: 520px;
       margin: auto;
@@ -65,7 +90,6 @@
       background: #fff;
     }
 
-    /* dateのアイコン対策 */
     .dateWrap { position: relative; }
     input[type="date"] { padding-right: 12px; }
     input[type="date"]::-webkit-calendar-picker-indicator {
@@ -92,10 +116,12 @@
 
   <div class="list-container">
     <h2>📅 予約リストから選択</h2>
-    <div class="filter-area">
-      <button class="btn-filter active" id="btnToday">今日のみ</button>
-      <button class="btn-filter" id="btnAll">全て表示</button>
-      <input type="text" id="searchInput" placeholder="名前検索..." style="flex:1;">
+    
+    <div class="filter-area" id="dateButtonsContainer">
+      </div>
+
+    <div class="search-area">
+      <input type="text" id="searchInput" placeholder="名前で検索...">
     </div>
     
     <div id="loading" style="font-size:12px; color:#666;">読み込み中...</div>
@@ -115,6 +141,8 @@
       </table>
     </div>
   </div>
+
+
   <div class="box" id="toolBox">
     <h1>🗓 面談メモ生成ツール</h1>
 
@@ -147,7 +175,7 @@
 
 <script>
 (() => {
-  // --- 1. 頂いたツールのロジック（そのまま） ---
+  // --- 1. ツールロジック（保持） ---
   const week = ["日","月","火","水","木","金","土"];
   const LINE = "──────────────";
 
@@ -159,15 +187,12 @@
   const copyAllBtn = document.getElementById("copyAllBtn");
   const copyDateBtn = document.getElementById("copyDateBtn");
 
-  // 時間生成（※リストの22時などの予約に対応するため、裏側では範囲を広げておきました）
   function buildTimes() {
     timeEl.innerHTML = "";
-    // データに合わせて 5時〜23時 まで生成しておきます（見た目は頂いたコードのデザインのまま）
     for (let h = 5; h <= 23; h++) {
       const opt = document.createElement("option");
       opt.value = String(h);
       opt.textContent = `${h}時～面談開始`;
-      // デフォルト選択を10時にしておく
       if(h === 10) opt.selected = true;
       timeEl.appendChild(opt);
     }
@@ -210,7 +235,6 @@ ${LINE}`;
     if (!p) return "";
     const dateBox = buildDateBox();
     
-    // ★頂いた文面そのまま
     return `フヤセルサポートです。
 ご連絡いただきありがとうございます。
 
@@ -280,31 +304,98 @@ ${dateBox}
   renderPreview();
 
 
-  // --- 2. 予約リスト連携機能（新規追加） ---
+  // --- 2. 予約リスト連携機能（アップデート版） ---
   const API_URL = "https://script.google.com/macros/s/AKfycbzUynvjJBAh2vCS_umO_I5_b4EsN5l6KnApahCpoY2EM9zGhrJAWrB2rUarBlSPzZoK/exec";
   let allData = [];
+
+  // ▼ 新機能：日付ボタンを生成する関数
+  function initDateButtons() {
+    const container = document.getElementById('dateButtonsContainer');
+    container.innerHTML = ""; // クリア
+
+    // 0日後(今日) 〜 6日後 までループ
+    for(let i=0; i<=6; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        
+        // ボタンのラベル作成
+        let label = "";
+        if(i === 0) label = "今日";
+        else if(i === 1) label = "明日";
+        else if(i === 2) label = "明後日";
+        else label = `${i}日後`;
+        
+        // 日付文字列作成 (検索用: YYYY.MM.DD)
+        const y = d.getFullYear();
+        const m = ('0' + (d.getMonth()+1)).slice(-2);
+        const day = ('0' + d.getDate()).slice(-2);
+        const dateStr = `${y}.${m}.${day}`;
+
+        // ボタン作成
+        const btn = document.createElement("button");
+        btn.className = "btn-filter";
+        btn.textContent = `${label} (${m}/${day})`; // 例: 明日 (01/15)
+        if(i === 0) btn.classList.add("active"); // 最初は今日を選択
+        
+        // クリックイベント
+        btn.onclick = () => {
+            // 全ボタンのactiveを外す
+            document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            // フィルター実行
+            filterListByDate(dateStr);
+        };
+        
+        container.appendChild(btn);
+    }
+
+    // 最後に「全て」ボタンを追加
+    const btnAll = document.createElement("button");
+    btnAll.className = "btn-filter";
+    btnAll.textContent = "全て表示";
+    btnAll.onclick = () => {
+        document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
+        btnAll.classList.add("active");
+        renderList(allData);
+    };
+    container.appendChild(btnAll);
+  }
 
   // データ取得
   fetch(API_URL)
     .then(res => res.json())
     .then(data => {
       allData = data;
-      filterList('today'); // 初期表示
+      initDateButtons(); // ボタン生成
+      
+      // 最初は「今日」でフィルター
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = ('0' + (today.getMonth()+1)).slice(-2);
+      const d = ('0' + today.getDate()).slice(-2);
+      filterListByDate(`${y}.${m}.${d}`);
+
       document.getElementById('loading').style.display = 'none';
       document.getElementById('customerTable').style.display = 'table';
     })
     .catch(err => console.error(err));
+
+  // 日付文字列でフィルターする関数
+  function filterListByDate(targetDateStr) {
+    // targetDateStr: "2026.01.14" など
+    const filtered = allData.filter(row => row[2] && row[2].includes(targetDateStr));
+    renderList(filtered);
+  }
 
   // リスト描画
   function renderList(data) {
     const tbody = document.getElementById('tableBody');
     tbody.innerHTML = "";
     if(data.length === 0) {
-      tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; color:#999;'>該当なし</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; color:#999; padding:20px;'>予約なし</td></tr>";
       return;
     }
     data.forEach(row => {
-      // 列: C=2(日), D=3(時), M=12(名), F=5(ステータス)
       const dStr = row[2];
       const tStr = row[3];
       const name = row[12] || row[6] || "名称なし";
@@ -314,26 +405,19 @@ ${dateBox}
       tr.className = "clickable";
       tr.innerHTML = `<td>${dStr}</td><td>${tStr}</td><td style="font-weight:bold">${name}</td><td>${status}</td>`;
       
-      // ★クリック時の連携処理
       tr.onclick = () => {
-        // 色変え
         document.querySelectorAll('tr').forEach(t => t.classList.remove('selected'));
         tr.classList.add('selected');
 
-        // 日付入力 (YYYY.MM.DD -> YYYY-MM-DD)
         if(dStr) {
-           const cleanDate = dStr.replace(/\./g, '-').split(' ')[0]; // (水)などを除去
+           const cleanDate = dStr.replace(/\./g, '-').split(' ')[0];
            dateEl.value = cleanDate;
         }
-        // 時間入力 (10:00 -> 10)
         if(tStr) {
            const hour = parseInt(tStr);
            if(hour) timeEl.value = String(hour);
         }
-        // プレビュー更新
         renderPreview();
-        
-        // スマホなら下へスクロール
         if(window.innerWidth < 600) {
             document.getElementById('toolBox').scrollIntoView({behavior: "smooth"});
         }
@@ -341,33 +425,11 @@ ${dateBox}
       tbody.appendChild(tr);
     });
   }
-
-  // フィルター
-  function filterList(type) {
-    const btnToday = document.getElementById('btnToday');
-    const btnAll = document.getElementById('btnAll');
-    
-    const today = new Date();
-    const y = today.getFullYear();
-    const m = ('0' + (today.getMonth()+1)).slice(-2);
-    const d = ('0' + today.getDate()).slice(-2);
-    const todayStr = `${y}.${m}.${d}`; // スプシ形式に合わせる
-
-    if(type === 'today') {
-      btnToday.classList.add('active');
-      btnAll.classList.remove('active');
-      renderList(allData.filter(row => row[2] && row[2].includes(todayStr)));
-    } else {
-      btnAll.classList.add('active');
-      btnToday.classList.remove('active');
-      renderList(allData);
-    }
-  }
   
-  // イベントリスナー
-  document.getElementById('btnToday').onclick = () => filterList('today');
-  document.getElementById('btnAll').onclick = () => filterList('all');
+  // 名前検索機能
   document.getElementById('searchInput').onkeyup = (e) => {
+    // 検索時はボタンのactiveを解除したほうが自然
+    document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
     const val = e.target.value.toLowerCase();
     renderList(allData.filter(row => row.join(" ").toLowerCase().includes(val)));
   };
